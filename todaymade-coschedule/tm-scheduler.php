@@ -2,7 +2,7 @@
 /*
 Plugin Name: CoSchedule by Todaymade
 Description: Schedule social media messages alongside your blog posts in WordPress, and then view them on a Google Calendar interface. <a href="http://app.coschedule.com" target="_blank">Account Settings</a>
-Version: 1.9.2
+Version: 1.9.12
 Author: Todaymade
 Author URI: http://todaymade.com/
 Plugin URI: http://coschedule.com/
@@ -20,10 +20,10 @@ if ( ! class_exists( 'tm_coschedule' ) ) {
 	 * Main Class
 	 */
 	class tm_coschedule  {
-		private $api = 'https://api.coschedule.com';
-		private $assets = 'https://d27i93e1y9m4f5.cloudfront.net';
-		private $version = '1.9.2';
-		private $build = 15;
+		private $api = "https://api.coschedule.com";
+		private $assets = "https://d27i93e1y9m4f5.cloudfront.net";
+		private $version = "1.9.12";
+		private $build = 25;
 		private $connected = false;
 		private $token = false;
 
@@ -56,26 +56,54 @@ if ( ! class_exists( 'tm_coschedule' ) ) {
 		}
 
 		/**
+		 * Print the contents of an array
+		 */
+		public function debug($array) {
+			echo '<pre>';
+			print_r($array);
+			echo '</pre>';
+		}
+
+		/**
 		 * Handles activation tasks, such as registering the uninstall hook.
 		 */
 		public function activation() {
-			register_uninstall_hook( __FILE__, array( $this, 'uninstall' ) );
+			register_uninstall_hook(__FILE__, array('tm_coschedule', 'uninstall'));
+
+			// Set redirection to true
+			add_option('tm_coschedule_activation_redirect', true);
+		}
+
+		/**
+		 * Checks to see if the plugin was just activated to redirect them to settings
+		 */
+		public function activation_redirect() {
+			if (get_option('tm_coschedule_activation_redirect', false)) {
+				// Redirect to settings page
+				if (delete_option('tm_coschedule_activation_redirect')) {
+					wp_redirect('options-general.php?page=tm_coschedule');
+				}
+			}
 		}
 
 		/**
 		 * Handles deactivation tasks, such as deleting plugin options.
 		 */
 		public function deactivation() {
-			delete_option( 'tm_coschedule_token' );
-			delete_option( 'tm_coschedule_id' );
+			delete_option('tm_coschedule_token');
+			delete_option('tm_coschedule_id');
+			delete_option('tm_coschedule_activation_redirect');
+			delete_option('tm_coschedule_custom_post_types_list');
 		}
 
 		/**
 		 * Handles uninstallation tasks, such as deleting plugin options.
 		 */
 		public function uninstall() {
-			delete_option( 'tm_coschedule_token' );
-			delete_option( 'tm_coschedule_id' );
+			delete_option('tm_coschedule_token');
+			delete_option('tm_coschedule_id');
+			delete_option('tm_coschedule_activation_redirect');
+			delete_option('tm_coschedule_custom_post_types_list');
 		}
 
 		/**
@@ -122,7 +150,15 @@ if ( ! class_exists( 'tm_coschedule' ) ) {
 			add_action( 'wp_ajax_nopriv_tm_aj_get_full_post', array( $this, 'tm_aj_get_full_post' ) );
 
 			// Ajax: Set token
-			add_action( 'wp_ajax_tm_aj_set_token', array( $this, 'tm_aj_set_token' ) );
+			add_action('wp_ajax_tm_aj_set_token', array($this, 'tm_aj_set_token'));
+
+			// Ajax: Check token
+			add_action('wp_ajax_tm_aj_check_token', array($this, 'tm_aj_check_token'));
+			add_action('wp_ajax_nopriv_tm_aj_check_token', array($this, 'tm_aj_check_token'));
+
+			// Ajax: Set custom post types
+			add_action('wp_ajax_tm_aj_set_custom_post_types', array($this, 'tm_aj_set_custom_post_types'));
+			add_action('wp_ajax_nopriv_tm_aj_set_custom_post_types', array($this, 'tm_aj_set_custom_post_types'));
 
 			// Ajax: Get function
 			add_action( 'wp_ajax_tm_aj_function', array( $this, 'tm_aj_function' ) );
@@ -136,7 +172,10 @@ if ( ! class_exists( 'tm_coschedule' ) ) {
 			add_action( 'admin_menu', array( $this, 'add_menu' ) );
 
 			// Add settings link to plugins listing page
-			add_filter( 'plugin_action_links', array( $this, 'plugin_settings_link' ), 2, 2 );
+			add_filter('plugin_action_links', array($this, 'plugin_settings_link'), 2, 2);
+
+			// Add check for activation redirection
+			add_action('admin_init', array($this, 'activation_redirect'));
 		}
 
 		/**
@@ -148,9 +187,9 @@ if ( ! class_exists( 'tm_coschedule' ) ) {
 			// Enqueue scripts for settings
 			add_action( 'admin_print_styles-' . $settings_1, array( $this, 'plugin_settings_scripts' ) );
 
-			// Swith main nav link between settings and the calendar depending on if they are connected
-			if ( $this->connected ) {
-				add_menu_page( 'CoSchedule Calendar', 'Calendar', 'edit_posts', 'tm_coschedule_calendar', array( $this, 'plugin_calendar_page' ), $this->assets . '/plugin/icon.png', '50.505' );
+			// Switch main nav link between settings and the calendar depending on if they are connected
+			if ($this->connected) {
+				add_menu_page('CoSchedule Calendar', 'Calendar', 'edit_posts', 'tm_coschedule_calendar', array($this, 'plugin_calendar_page'), $this->assets.'/plugin/icon.png', '50.505' );
 			} else {
 				$settings_2 = add_menu_page( 'CoSchedule Calendar', 'Calendar', 'edit_posts', 'tm_coschedule_calendar', array( $this, 'plugin_settings_page' ), $this->assets . '/plugin/icon.png', '50.505' );
 				// Enqueue scripts for settings
@@ -213,6 +252,47 @@ if ( ! class_exists( 'tm_coschedule' ) ) {
 		}
 
 		/**
+		 * Checks if the meta box should be included on the page based on post type
+		 */
+		public function meta_box_enabled() {
+			$post_type = $this->get_current_post_type();
+			$custom_post_types_list = get_option('tm_coschedule_custom_post_types_list');
+
+			// Grab remote list if not set
+			if (!$custom_post_types_list) {
+				if ($this->connected) {
+					// Load remote blog information
+					$resp = $this->api_get('/wordpress_keys?_wordpress_key='. $this->token);
+					if (isset($resp['response']['code']) && $resp['response']['code'] === 200) {
+						$json = json_decode($resp['body'], true);
+
+						// Check for a good response
+						if (isset($json['result'][0]) && $json['result'][0]['custom_post_types']) {
+							$custom_post_types_list = $json['result'][0]['custom_post_types_list'];
+
+							// Save custom list
+							if (!empty($custom_post_types_list)) {
+								update_option('tm_coschedule_custom_post_types_list', $custom_post_types_list);
+							}
+						}
+					}
+				}
+			}
+
+			// Default
+			if (empty($custom_post_types_list)) {
+				$custom_post_types_list = 'post';
+				update_option('tm_coschedule_custom_post_types_list', $custom_post_types_list);
+			}
+
+			// Convert to an array
+			$custom_post_types_list_array = explode(',', $custom_post_types_list);
+
+			// Check if post type is supported
+			return in_array($post_type, $custom_post_types_list_array);
+		}
+
+		/**
 		 * Adds action to insert a meta box
 		 */
 		public function meta_box_action() {
@@ -223,15 +303,13 @@ if ( ! class_exists( 'tm_coschedule' ) ) {
 		 * Enqueue the css and js for the metabox
 		 */
 		public function meta_box_scripts() {
-			$cache_bust = $this->get_cache_bust();
-			$post_type = $this->get_current_post_type();
-
-			// Only load our scripts on post
-			if ( $post_type === 'post' ) {
-				wp_enqueue_style( 'cos_css', $this->assets . '/css/wordpress_plugin.css?cb=' . $cache_bust );
-				wp_enqueue_script( 'cos_js_config', $this->assets . '/js/config.js?cb=' . $cache_bust, false, null, true );
-				wp_enqueue_script( 'cos_js_plugin', $this->assets . '/js/plugin.js?cb=' . $cache_bust, false, null, true );
-				wp_enqueue_script( 'cos_js_transloadit', 'http://assets.transloadit.com/js/jquery.transloadit2-latest.js', false, null, true );
+			$enabled = $this->meta_box_enabled();
+			if ($enabled) {
+				$cache_bust = $this->get_cache_bust();
+				wp_enqueue_style('cos_css', $this->assets.'/css/wordpress_plugin.css?cb='.$cache_bust);
+				wp_enqueue_script('cos_js_config', $this->assets.'/js/config.js?cb='.$cache_bust, false, null, true);
+				wp_enqueue_script('cos_js_plugin', $this->assets.'/js/plugin.js?cb='.$cache_bust, false, null, true);
+				wp_enqueue_script('cos_js_transloadit', 'http://assets.transloadit.com/js/jquery.transloadit2-latest.js', false, null, true);
 			}
 		}
 
@@ -239,14 +317,18 @@ if ( ! class_exists( 'tm_coschedule' ) ) {
 		 * Sets up the meta box to be inserted
 		 */
 		public function meta_box_setup() {
-			add_meta_box(
-				'tm-scheduler',							// Unique ID
-				'CoSchedule',							// Title
-				array( &$this, 'meta_box_insert' ),		// Callback function
-				'post',									// Admin page (or post type)
-				'normal',								// Context
-				'default'								// Priority
-			);
+			$enabled = $this->meta_box_enabled();
+			if ($enabled) {
+				$post_type = $this->get_current_post_type();
+				add_meta_box(
+					'tm-scheduler',						    // Unique ID
+					'CoSchedule',							// Title
+					array(&$this, 'meta_box_insert'),		// Callback function
+					$post_type,								// Admin page (or post type)
+					'normal',								// Context
+					'default'								// Priority
+				);
+			}
 		}
 
 		/**
@@ -283,7 +365,8 @@ if ( ! class_exists( 'tm_coschedule' ) ) {
 			if ( $validate === true ) {
 				return true;
 			} else {
-				echo json_encode( array( 'error' => $validate ) );
+				header('Content-Type: application/json');
+				echo json_encode(array("error"=>$validate));
 				die();
 			}
 		}
@@ -292,34 +375,66 @@ if ( ! class_exists( 'tm_coschedule' ) ) {
 		 * Ajax: Return blog info
 		 */
 		public function tm_aj_get_bloginfo() {
-			$vars = array(
-				'name' => get_bloginfo( 'name' ),
-				'description' => get_bloginfo( 'description' ),
-				'wpurl' => get_bloginfo( 'wpurl' ),
-				'url' => get_bloginfo( 'url' ),
-				'version' =>get_bloginfo( 'version' ),
-				'language' => get_bloginfo( 'language' ),
-				'pingback_url' => get_bloginfo( 'pingback_url' ),
-				'rss2_url' => get_bloginfo( 'rss2_url' ),
-				'timezone_string' => get_option( 'timezone_string' ),
-				'gmt_offset' => get_option( 'gmt_offset' ),
-				'plugin_version' => $this->version,
-				'plugin_build' => $this->build
-			);
+			try {
+				header('Content-Type: application/json');
+				$vars = array(
+					"name"=>get_bloginfo("name"),
+					"description"=>get_bloginfo("description"),
+					"wpurl"=>get_bloginfo("wpurl"),
+					"url"=>get_bloginfo("url"),
+					"version"=>get_bloginfo("version"),
+					"language"=>get_bloginfo("language"),
+					"pingback_url"=>get_bloginfo("pingback_url"),
+					"rss2_url"=>get_bloginfo("rss2_url"),
+					"timezone_string"=>get_option("timezone_string"),
+					"gmt_offset"=>get_option("gmt_offset"),
+					"plugin_version"=>$this->version,
+					"plugin_build"=>$this->build
+				);
 
-			if ( isset( $_GET['debug'] ) ) {
-				$vars['installed_plugins'] = $this->get_installed_plugins();
+				if (isset($_GET['tm_debug'])) {
+					$vars["debug"] = array();
+					$vars["debug"]["server_time"] = time();
+					$vars["debug"]["server_date"] = date('c');
+					$vars["debug"]["site_url"] = get_option('siteurl');
+					$vars["debug"]["php_version"] = phpversion();
+
+					$theme = wp_get_theme();
+					$vars["debug"]["theme"] = array();
+					$vars["debug"]["theme"]["Name"] = $theme->get('Name');
+					$vars["debug"]["theme"]["ThemeURI"] = $theme->get('ThemeURI');
+					$vars["debug"]["theme"]["Description"] = $theme->get('Description');
+					$vars["debug"]["theme"]["Author"] = $theme->get('Author');
+					$vars["debug"]["theme"]["AuthorURI"] = $theme->get('AuthorURI');
+					$vars["debug"]["theme"]["Version"] = $theme->get('Version');
+					$vars["debug"]["theme"]["Template"] = $theme->get('Template');
+					$vars["debug"]["theme"]["Status"] = $theme->get('Status');
+					$vars["debug"]["theme"]["Tags"] = $theme->get('Tags');
+					$vars["debug"]["theme"]["TextDomain"] = $theme->get('TextDomain');
+					$vars["debug"]["theme"]["DomainPath"] = $theme->get('DomainPath');
+
+					$vars["debug"]["plugins"] = $this->get_installed_plugins();
+				}
+				echo json_encode($this->array_decode_entities($vars));
+				die();
+			} catch (Exception $e) {
+				header('Content-Type: text/plain');
+				echo 'Exception: ' . $e->getMessage();
 			}
-
-			echo json_encode( $this->array_decode_entities( $vars ) );
-			die();
 		}
 
 		/**
 		 * Ajax: Return full post with permalink
 		 */
 		public function tm_aj_get_full_post() {
-			echo json_encode( $this->get_full_post( $_GET['post_id'] ) );
+			try {
+				header('Content-Type: application/json');
+				echo json_encode($this->get_full_post($_GET['post_id']));
+				die();
+			} catch (Exception $e) {
+				header('Content-Type: text/plain');
+				echo 'Exception: ' . $e->getMessage();
+			}
 			die();
 		}
 
@@ -327,9 +442,67 @@ if ( ! class_exists( 'tm_coschedule' ) ) {
 		 * Ajax: Set token
 		 */
 		public function tm_aj_set_token() {
-			update_option( 'tm_coschedule_token', $_POST['token'] );
-			update_option( 'tm_coschedule_id', $_POST['id'] );
-			echo $_POST['token'];
+			header('Content-Type: text/plain');
+
+			try {
+				if (isset($_POST['token'])) {
+					update_option('tm_coschedule_token', $_POST['token']);
+					update_option('tm_coschedule_id', $_POST['id']);
+					echo $_POST['token'];
+				} else if (isset($_GET['token'])) {
+					update_option('tm_coschedule_token', $_GET['token']);
+					update_option('tm_coschedule_id', $_GET['id']);
+					echo $_GET['token'];
+				}
+			} catch (Exception $e) {
+				echo 'Exception: ' . $e->getMessage();
+			}
+			die();
+		}
+
+		/**
+		 * Ajax: Check a token against the current token
+		 */
+		public function tm_aj_check_token() {
+			header('Content-Type: text/plain');
+
+			try {
+				// Check request token
+				if (!isset($_GET['token']) || empty($_GET['token'])) {
+					echo 'Token not provided in request';
+					die();
+				}
+
+				// Check stored token
+				if (!isset($this->token) || empty($this->token)) {
+					echo 'No token saved in WordPress';
+					die();
+				}
+
+				// Compare
+				if ($_GET['token'] == $this->token) {
+					echo "Tokens match";
+				} else {
+					echo "Tokens do not match";
+				}
+			} catch (Exception $e) {
+				echo 'Exception: ' . $e->getMessage();
+			}
+			die();
+		}
+
+		/**
+		 * Ajax: Set custom post types
+		 */
+		public function tm_aj_set_custom_post_types() {
+			header('Content-Type: text/plain');
+
+			try {
+				echo $_GET['post_types_list'];
+				update_option('tm_coschedule_custom_post_types_list', $_GET['post_types_list']);
+			} catch (Exception $e) {
+				echo 'Exception: ' . $e->getMessage();
+			}
 			die();
 		}
 
@@ -337,39 +510,51 @@ if ( ! class_exists( 'tm_coschedule' ) ) {
 		 * Ajax: Get function
 		 */
 		public function tm_aj_function() {
-			// Validate call
-			$this->valid_token( $_GET['token'] );
+			header('Content-Type: text/plain');
 
-			// Save args
-			$args = $_GET;
+			try {
+				// Validate call
+				$this->valid_token($_GET['token']);
 
-			// Remove action name
-			unset( $args['action'] );
+				// Save args
+				$args = $_GET;
 
-			// Remove token
-			unset( $args['token'] );
+				// Remove action name
+				unset($args['action']);
 
-			// Save and remove function name
-			$func = $args['call'];
-			unset( $args['call'] );
+				// Remove token
+				unset($args['token']);
 
-			// Call public or private Function
-			if ( isset( $args['private'] ) ) {
-				unset( $args['private'] );
-				$out = call_user_func_array( array( $this, $func ), $args );
-			} else {
-				$out = call_user_func_array( $func, $args );
-			}
+				// Save and remove function name
+				$func = $args['call'];
+				unset($args['call']);
 
-			if ( is_array( $out ) ) {
-				echo json_encode( $out );
-			} else {
-				// Check for errors
-				if ( is_wp_error( $out ) ) {
-					echo $out->get_error_message();
-				} else {
-					echo $out;
+				// Fix: Prevent WP from stripping iframe tags when updating post
+				if ($func === "wp_update_post") {
+					remove_filter('content_save_pre', 'wp_filter_post_kses');
 				}
+
+				// Call public or private Function
+				if (isset($args['private'])) {
+					unset($args['private']);
+					$out = call_user_func_array(array($this, $func), $args);
+				} else {
+					$out = call_user_func_array($func, $args);
+				}
+
+				if (is_array($out)) {
+					header('Content-Type: application/json');
+					echo json_encode($out);
+				} else {
+					// Check for errors
+					if (is_wp_error($out) ) {
+						echo $out->get_error_message();
+					} else {
+						echo $out;
+					}
+				}
+			} catch (Exception $e) {
+				echo 'Exception: ' . $e->getMessage();
 			}
 			die();
 		}
@@ -378,35 +563,60 @@ if ( ! class_exists( 'tm_coschedule' ) ) {
 		 * AJAX: Handles deactivation task
 		 */
 		public function tm_aj_deactivation() {
-			// Validate call
-			$this->valid_token( $_GET['token'] );
+			header('Content-Type: text/plain');
 
-			delete_option( 'tm_coschedule_token' );
-			delete_option( 'tm_coschedule_id' );
+			try {
+				// Validate call
+				$this->valid_token($_GET['token']);
+
+				delete_option('tm_coschedule_token');
+				delete_option('tm_coschedule_id');
+			} catch (Exception $e) {
+				header('Content-Type: text/plain');
+				echo 'Exception: ' . $e->getMessage();
+			}
 			die();
 		}
 
 		/**
 		 * Get the post by id, with permalink and attachments
 		 */
-		public function get_full_post( $post_id ) {
-			$post = get_post( $post_id, 'ARRAY_A' );
-			$post['permalink'] = get_permalink( $post_id );
+		public function get_full_post($post_id) {
+			$post = get_post($post_id, "ARRAY_A");
+			$post['permalink'] = get_permalink($post_id);
 
 			// Media attachments
 			$post['attachments'] = array();
-			$featured_image = $this->get_thumbnail( $post_id );
-			if ( $featured_image ) {
-				array_push( $post['attachments'], $featured_image );
+			$featured_image = $this->get_thumbnail($post_id);
+			if ($featured_image) {
+				array_push($post['attachments'], $featured_image);
 			}
 
 			// Merge and remove attachment duplicates
-			$post['attachments'] = array_merge( $post['attachments'], $this->get_attachments( $post_id ) );
-			$post['attachments'] = array_unique( $post['attachments'] );
+			$post['attachments'] = array_merge($post['attachments'], $this->get_attachments($post_id));
+			$post['attachments'] = array_unique($post['attachments']);
 
-			// Generate an excerpt if one isn't available
-			if ( isset( $post['post_excerpt'] ) && empty( $post['post_excerpt'] ) ) {
-				$post['post_excerpt'] = $this->get_post_excerpt_by_id( $post_id );
+			// Fill except and remove content
+			if (isset($post['post_content'])) {
+				// Generate an excerpt if one isn't available
+				if (!isset($post['post_excerpt']) || (isset($post['post_excerpt']) && empty($post['post_excerpt']))) {
+					$post['post_excerpt'] = $this->get_post_excerpt($post['post_content']);
+				}
+
+				// Remove content
+				unset($post['post_content']);
+			}
+
+			// Remove content filtered
+			if (isset($post['post_content_filtered'])) {
+				unset($post['post_content_filtered']);
+			}
+
+			// Process category
+			if (!is_null($post['post_category'])) {
+				$post['post_category'] = implode($post['post_category'], ',');
+			} else {
+				$post['post_category'] = "";
 			}
 
 			return $post;
@@ -415,18 +625,20 @@ if ( ! class_exists( 'tm_coschedule' ) ) {
 		/**
 		 * Generate an excerpt by taking the first words of the post
 		 */
-		public function get_post_excerpt_by_id( $post_id ) {
-			$the_post = get_post( $post_id );
-			$the_excerpt = $the_post->post_content;
+		public function get_post_excerpt($content) {
+			$the_excerpt = html_entity_decode($content, ENT_QUOTES, 'UTF-8');
 			$excerpt_length = 35; // Sets excerpt length by word count
-			$the_excerpt = strip_tags( strip_shortcodes( $the_excerpt ) ); //Strips tags and images
-			$words = explode( ' ', $the_excerpt, $excerpt_length + 1 );
+			$the_excerpt = strip_tags(strip_shortcodes($the_excerpt)); //Strips tags and images
+			$words = explode(' ', $the_excerpt, $excerpt_length + 1);
 
-			if( count( $words ) > $excerpt_length ) {
-				array_pop( $words );
-				array_push( $words, '…' );
-				$the_excerpt = implode( ' ', $words );
+			if(count($words) > $excerpt_length) {
+				array_pop($words);
+				array_push($words, '…');
+				$the_excerpt = implode(' ', $words);
 			}
+
+			// Remove undesirable whitespace and condense consecutive spaces
+			$the_excerpt = preg_replace('/\s+/', " ", $the_excerpt);
 
 			return $the_excerpt;
 		}
@@ -439,14 +651,10 @@ if ( ! class_exists( 'tm_coschedule' ) ) {
 			$out = call_user_func_array( 'get_posts', $args );
 
 			$posts = array();
-			foreach ( $out as $post ) {
-				$post = $this->get_full_post( $post->ID );
-				if ( ! is_null( $post['post_category'] ) ) {
-					$post['post_category'] = implode( $post['post_category'], ',' );
-				} else {
-					$post['post_category'] = '';
-				}
-				array_push( $posts, $post );
+			foreach ($out as $post) {
+				$post = $this->get_full_post($post->ID);
+
+				array_push($posts, $post);
 			}
 			return $posts;
 		}
@@ -454,20 +662,20 @@ if ( ! class_exists( 'tm_coschedule' ) ) {
 		/**
 		 * Get the thumbnail url of the post
 		 */
-		public function get_thumbnail( $post_id ) {
-			$post_thumbnail_id = get_post_thumbnail_id( $post_id );
-			$post_thumbnail_url = wp_get_attachment_url( $post_thumbnail_id );
+		public function get_thumbnail($post_id) {
+			$post_thumbnail_id = get_post_thumbnail_id($post_id);
+			$post_thumbnail_url = wp_get_attachment_url($post_thumbnail_id);
 			$site_url = get_site_url();
 
 			// remove trailing slash from site url
-			if( substr( $site_url, -1 ) == '/' ) {
-				$site_url = substr( $site_url, 0, -1 );
+			if(substr($site_url, -1) == '/') {
+				$site_url = substr($site_url, 0, -1);
 			}
 
 			// Only include valid URL
-			if ( is_string( $post_thumbnail_url ) && strlen( $post_thumbnail_url ) > 0 ) {
+			if (is_string($post_thumbnail_url) && strlen($post_thumbnail_url) > 0) {
 				// Older versions of WordPress (<3.6) may exclude site URL from attachment URL
-				if ( strpos( $post_thumbnail_url, 'http' ) === false ) {
+				if (strpos($post_thumbnail_url, 'http') === FALSE) {
 					$post_thumbnail_url = $site_url . $post_thumbnail_url;
 				}
 			} else {
@@ -480,30 +688,30 @@ if ( ! class_exists( 'tm_coschedule' ) ) {
 		/**
 		 * Get array of all attachments of the post
 		 */
-		public function get_attachments( $post_id ) {
+		public function get_attachments($post_id) {
 			$attachments = array();
 			$site_url = get_site_url();
 
 			// remove trailing slash from site url
-			if ( substr( $site_url, -1 ) == '/' ) {
-				$site_url = substr( $site_url, 0, -1 );
+			if(substr($site_url, -1) == '/') {
+				$site_url = substr($site_url, 0, -1);
 			}
 
 			// Get all images of the post
-			$images =& get_children( 'post_type=attachment&post_mime_type=image&output=ARRAY_N&orderby=menu_order&order=ASC&post_parent=' . $post_id );
+			$images =& get_children('post_type=attachment&post_mime_type=image&output=ARRAY_N&orderby=menu_order&order=ASC&post_parent='.$post_id);
 
 			// Loop through images to get URLs
-			if ( $images ) {
-				foreach( $images as $image_id => $image_post ){
-					$image_url = wp_get_attachment_url( $image_id );
+			if($images){
+				foreach($images as $image_id => $image_post){
+					$image_url = wp_get_attachment_url($image_id);
 
 					// Only include valid URLs
-					if ( is_string( $image_url ) ) {
+					if (is_string($image_url)) {
 						// Older versions of WordPress (<3.6) may exclude site URL from attachment URL
-						if ( strpos( $image_url, 'http' ) === false ) {
+						if (strpos($image_url, 'http') === FALSE) {
 							$image_url = $site_url . $image_url;
 						}
-						array_push( $attachments, $image_url );
+						array_push($attachments, $image_url);
 					}
 				}
 			}
@@ -516,15 +724,18 @@ if ( ! class_exists( 'tm_coschedule' ) ) {
 		 */
 		public function get_installed_plugins() {
 			$plugins = array();
+			$plugins['active'] = array();
+			$plugins['inactive'] = array();
 
-			foreach ( get_plugins() as $key => $plugin ) {
-				$p = array(
-					'Name' => $plugin['Name'],
-					'Version' => $plugin['Version'],
-					'Website' => $plugin['AuthorURI'],
-					'Status' => is_plugin_active( $key ) ? 'Active' : 'Inactive'
-				);
-				array_push( $plugins, $p );
+			foreach (get_plugins() as $key => $plugin) {
+				$plugin["path"] = $key;
+				$plugin["status"] = is_plugin_active($key) ? "Active" : "Inactive";
+
+				if (is_plugin_active($key)) {
+					array_push($plugins['active'], $plugin);
+				} else {
+					array_push($plugins['inactive'], $plugin);
+				}
 			}
 
 			return $plugins;
@@ -637,9 +848,9 @@ if ( ! class_exists( 'tm_coschedule' ) ) {
 		public function array_decode_entities( $array ){
 			$new_array = array();
 
-			foreach ( $array as $key => $string ) {
-				if( is_string( $string ) ) {
-					$new_array[$key] = html_entity_decode( $string, ENT_QUOTES );
+			foreach ($array as $key => $string) {
+				if(is_string($string)) {
+					$new_array[$key] = html_entity_decode($string, ENT_QUOTES);
 				} else {
 					$new_array[$key] = $string;
 				}
